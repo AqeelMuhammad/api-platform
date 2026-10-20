@@ -13535,6 +13535,15 @@ components:
           description: List of policies to be applied
           items:
             $ref: '#/components/schemas/Policy'
+        subscriptionPlans:
+          type: array
+          description: |
+            List of subscription plan names enabled for this MCP proxy (e.g. Gold, Silver).
+            When set, only these plans can be used when subscribing to the MCP proxy.
+            Each plan must exist in the organization and be ACTIVE.
+          items:
+            type: string
+          example: [Gold, Silver]
         kind:
           type: string
           description: Kind of the API based on its communication protocol or architectural style

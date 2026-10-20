@@ -6828,6 +6828,16 @@ export interface components {
             /** @description List of policies to be applied */
             policies?: components["schemas"]["Policy"][];
             /**
+             * @description List of subscription plan names enabled for this MCP proxy (e.g. Gold, Silver).
+             *     When set, only these plans can be used when subscribing to the MCP proxy.
+             *     Each plan must exist in the organization and be ACTIVE.
+             * @example [
+             *       "Gold",
+             *       "Silver"
+             *     ]
+             */
+            subscriptionPlans?: string[];
+            /**
              * @description Kind of the API based on its communication protocol or architectural style
              * @default Mcp
              * @example Mcp

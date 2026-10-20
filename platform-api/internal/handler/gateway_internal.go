@@ -527,6 +527,81 @@ func (h *GatewayInternalAPIHandler) GetSubscriptions(w http.ResponseWriter, r *h
 	httputil.WriteJSON(w, http.StatusOK, subs)
 }
 
+// GetMCPProxySubscriptions handles GET /api/internal/v1/mcp-proxies/{proxyId}/subscriptions
+func (h *GatewayInternalAPIHandler) GetMCPProxySubscriptions(w http.ResponseWriter, r *http.Request) {
+	orgID, gatewayID, ok := h.authenticateRequest(w, r)
+	if !ok {
+		return
+	}
+
+	proxyID := r.PathValue("proxyId")
+	if proxyID == "" {
+		clientIP := r.RemoteAddr
+		if i := strings.LastIndex(clientIP, ":"); i != -1 {
+			clientIP = clientIP[:i]
+		}
+		h.slogger.Error("MCP proxy ID is required for subscriptions request",
+			"clientIP", clientIP,
+			"organizationId", orgID,
+			"proxyId", proxyID)
+		httputil.WriteJSON(w, http.StatusBadRequest, dto.NewInternalErrorResponse(400, "Bad Request",
+			"MCP proxy ID is required"))
+		return
+	}
+
+	if err := h.gatewayInternalService.IsMCPProxyDeployedOnGateway(proxyID, gatewayID, orgID); err != nil {
+		if apperror.MCPProxyNotFound.Is(err) {
+			h.slogger.Error("MCP proxy not found when listing subscriptions",
+				"proxyId", proxyID,
+				"organizationId", orgID,
+				"gatewayId", gatewayID,
+				"error", err)
+			httputil.WriteJSON(w, http.StatusNotFound, dto.NewInternalErrorResponse(404, "Not Found",
+				"MCP proxy not found"))
+			return
+		}
+		if apperror.DeploymentNotActive.Is(err) {
+			h.slogger.Error("Subscription list denied - MCP proxy has no active deployment status on gateway",
+				"proxyId", proxyID,
+				"organizationId", orgID,
+				"gatewayId", gatewayID)
+			httputil.WriteJSON(w, http.StatusForbidden, dto.NewInternalErrorResponse(403, "Forbidden",
+				"MCP proxy is not associated with this gateway"))
+			return
+		}
+		h.slogger.Error("Failed to verify MCP proxy deployment for subscriptions",
+			"proxyId", proxyID,
+			"organizationId", orgID,
+			"gatewayId", gatewayID,
+			"error", err)
+		httputil.WriteJSON(w, http.StatusInternalServerError, dto.NewInternalErrorResponse(500, "Internal Server Error",
+			"Failed to verify MCP proxy deployment"))
+		return
+	}
+
+	subs, err := h.gatewayInternalService.ListSubscriptionsForMCPProxy(proxyID, orgID)
+	if err != nil {
+		if apperror.MCPProxyNotFound.Is(err) {
+			h.slogger.Error("MCP proxy not found when listing subscriptions",
+				"proxyId", proxyID,
+				"organizationId", orgID,
+				"error", err)
+			httputil.WriteJSON(w, http.StatusNotFound, dto.NewInternalErrorResponse(404, "Not Found",
+				"MCP proxy not found"))
+			return
+		}
+		h.slogger.Error("Failed to list subscriptions for MCP proxy",
+			"proxyId", proxyID,
+			"organizationId", orgID,
+			"error", err)
+		httputil.WriteJSON(w, http.StatusInternalServerError, dto.NewInternalErrorResponse(500, "Internal Server Error",
+			"Failed to get subscriptions"))
+		return
+	}
+
+	httputil.WriteJSON(w, http.StatusOK, subs)
+}
+
 // GetSubscriptionPlans handles GET /api/internal/v1/subscription-plans
 func (h *GatewayInternalAPIHandler) GetSubscriptionPlans(w http.ResponseWriter, r *http.Request) {
 	orgID, _, ok := h.authenticateRequest(w, r)
@@ -1188,6 +1263,7 @@ func (h *GatewayInternalAPIHandler) RegisterRoutes(mux router.Router) {
 	mux.HandleFunc("GET /api/internal/v1/deployments", h.GetGatewayDeployments)
 	mux.HandleFunc("POST /api/internal/v1/deployments/fetch-batch", h.BatchFetchDeployments)
 	mux.HandleFunc("GET /api/internal/v1/mcp-proxies/{proxyId}", h.GetMCPProxy)
+	mux.HandleFunc("GET /api/internal/v1/mcp-proxies/{proxyId}/subscriptions", h.GetMCPProxySubscriptions)
 	mux.HandleFunc("GET /api/internal/v1/agents/api-keys", h.GetAgentAPIKeys)
 	mux.HandleFunc("GET /api/internal/v1/agents/{agentId}", h.GetAgent)
 	mux.HandleFunc("GET /api/internal/v1/graphql-apis/api-keys", h.GetGraphQLAPIAPIKeys)

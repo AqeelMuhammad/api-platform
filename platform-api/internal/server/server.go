@@ -453,6 +453,9 @@ func StartPlatformAPIServer(cfg *config.Server, slogger *slog.Logger,
 	llmProviderService.SetProxyRepository(llmProxyRepo)
 	llmProxyService.SetTemplateRepository(llmTemplateRepo)
 	mcpProxyService.WithSecretService(secretService)
+	mcpProxyService.WithSubscriptionPlanRepository(subscriptionPlanRepo)
+	deploymentService.WithSubscriptionRepository(subscriptionRepo)
+	mcpDeploymentService.WithSubscriptionRepository(subscriptionRepo)
 	agentProxyService.WithSecretService(secretService)
 	apiService.SetSecretService(secretService)
 	// Gateways older than the secret-sync release receive artifacts with the

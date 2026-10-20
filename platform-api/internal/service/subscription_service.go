@@ -544,3 +544,66 @@ func (s *SubscriptionService) DeleteSubscription(subscriptionId, orgUUID, subscr
 	}
 	return nil
 }
+
+// BackfillSubscriptionsToGateway (re)broadcasts an artifact's existing subscriptions to a
+// gateway it has just been deployed to. Subscriptions are broadcast only when they change, and
+// only to the gateways the artifact is already associated with, so a subscription created before
+// this deployment would otherwise reach the gateway only after the gateway-controller's next
+// reconnect bulk sync (REST APIs), or never (kinds the bulk sync does not cover). Pushing existing
+// subscriptions here closes that window, the same way BackfillAPIKeysToGateway does for keys.
+//
+// Every status is sent, so the gateway also learns which subscriptions are suspended or revoked.
+//
+// Best-effort: the controller upserts subscription.created, so re-sending a subscription the
+// gateway already holds is harmless, and any failure is logged without blocking the deployment.
+func BackfillSubscriptionsToGateway(subscriptionRepo repository.SubscriptionRepository, events *GatewayEventsService, slogger *slog.Logger, artifactUUID, orgUUID, gatewayID string) {
+	if events == nil || subscriptionRepo == nil {
+		return
+	}
+
+	const pageSize = 1000
+	backfilled := 0
+	for offset := 0; ; offset += pageSize {
+		page, err := subscriptionRepo.ListByFilters(orgUUID, &artifactUUID, nil, nil, nil, pageSize, offset)
+		if err != nil {
+			if slogger != nil {
+				slogger.Warn("Failed to load subscriptions for deploy-time backfill",
+					"artifactId", artifactUUID, "gatewayId", gatewayID, "error", err)
+			}
+			return
+		}
+		for _, sub := range page {
+			if sub == nil {
+				continue
+			}
+			event := &model.SubscriptionCreatedEvent{
+				ApiId:             sub.ArtifactUUID,
+				SubscriptionId:    sub.UUID,
+				SubscriptionToken: sub.SubscriptionToken,
+				Status:            string(sub.Status),
+			}
+			if sub.ApplicationID != nil {
+				event.ApplicationId = *sub.ApplicationID
+			}
+			if sub.SubscriptionPlanID != nil {
+				event.SubscriptionPlanId = *sub.SubscriptionPlanID
+			}
+			if err := events.BroadcastSubscriptionCreatedEvent(gatewayID, event); err != nil {
+				if slogger != nil {
+					slogger.Warn("Failed to backfill subscription to gateway",
+						"artifactId", artifactUUID, "gatewayId", gatewayID, "subscriptionId", sub.UUID, "error", err)
+				}
+				continue
+			}
+			backfilled++
+		}
+		if len(page) < pageSize {
+			break
+		}
+	}
+
+	if backfilled > 0 && slogger != nil {
+		slogger.Info("Backfilled subscriptions to gateway",
+			"artifactId", artifactUUID, "gatewayId", gatewayID, "count", backfilled)
+	}
+}

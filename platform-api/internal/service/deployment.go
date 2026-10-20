@@ -57,6 +57,7 @@ type DeploymentService struct {
 	gatewayRepo          repository.GatewayRepository
 	orgRepo              repository.OrganizationRepository
 	apiKeyRepo           repository.APIKeyRepository
+	subscriptionRepo     repository.SubscriptionRepository
 	gatewayEventsService *GatewayEventsService
 	auditRepo            repository.AuditRepository
 	apiUtil              *utils.APIUtil
@@ -465,6 +466,8 @@ func (s *DeploymentService) DeployAPI(apiUUID string, req *api.DeployRequest, or
 		// associated) gateway so keys created before this association are recognized
 		// immediately, rather than only after the controller's next reconnect sync.
 		s.backfillAPIKeysToGateway(apiUUID, gatewayID, createdBy)
+		// Push existing subscriptions too (see BackfillSubscriptionsToGateway).
+		BackfillSubscriptionsToGateway(s.subscriptionRepo, s.gatewayEventsService, s.slogger, apiUUID, orgUUID, gatewayID)
 	}
 
 	resp, err := toAPIDeploymentResponse(
@@ -557,6 +560,8 @@ func (s *DeploymentService) RestoreDeployment(apiUUID, deploymentID, gatewayID, 
 		// Push existing active API keys for this artifact to the gateway so a restored
 		// deployment recognizes pre-existing keys immediately (see backfillAPIKeysToGateway).
 		s.backfillAPIKeysToGateway(apiUUID, targetDeployment.GatewayID, actor)
+		// Backfill existing subscriptions too (see BackfillSubscriptionsToGateway).
+		BackfillSubscriptionsToGateway(s.subscriptionRepo, s.gatewayEventsService, s.slogger, apiUUID, orgUUID, targetDeployment.GatewayID)
 	}
 
 	if s.auditRepo != nil {
@@ -1002,6 +1007,12 @@ func (s *DeploymentService) ensureAPIGatewayAssociation(apiUUID, gatewayID, orgU
 	}
 
 	return s.apiRepo.CreateAPIAssociation(association)
+}
+
+// WithSubscriptionRepository injects the repository used to push existing subscriptions to a
+// gateway on deploy and restore (see BackfillSubscriptionsToGateway).
+func (s *DeploymentService) WithSubscriptionRepository(repo repository.SubscriptionRepository) {
+	s.subscriptionRepo = repo
 }
 
 // backfillAPIKeysToGateway delegates to the shared BackfillAPIKeysToGateway helper so

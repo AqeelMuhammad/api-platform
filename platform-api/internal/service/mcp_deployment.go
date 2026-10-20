@@ -44,12 +44,19 @@ type MCPDeploymentService struct {
 	gatewayRepo          repository.GatewayRepository
 	orgRepo              repository.OrganizationRepository
 	apiKeyRepo           repository.APIKeyRepository
+	subscriptionRepo     repository.SubscriptionRepository
 	gatewayEventsService *GatewayEventsService
 	cfg                  *config.Server
 	utils                *utils.MCPUtils
 	// builds is the shared build store every artifact kind uses.
 	builds  *BuildService
 	slogger *slog.Logger
+}
+
+// WithSubscriptionRepository injects the repository used to push existing subscriptions to a
+// gateway on deploy and restore (see BackfillSubscriptionsToGateway).
+func (s *MCPDeploymentService) WithSubscriptionRepository(repo repository.SubscriptionRepository) {
+	s.subscriptionRepo = repo
 }
 
 func NewMCPDeploymentService(mcpRepo repository.MCPProxyRepository, deploymentRepo repository.DeploymentRepository,
@@ -399,6 +406,8 @@ func (s *MCPDeploymentService) deployMCPProxy(proxyUUID string, req *api.DeployR
 
 		// Push existing active API keys for this proxy to the gateway (see BackfillAPIKeysToGateway).
 		BackfillAPIKeysToGateway(s.apiKeyRepo, s.gatewayRepo, s.gatewayEventsService, s.slogger, proxyUUID, gatewayID, createdBy)
+		// Push existing subscriptions too (see BackfillSubscriptionsToGateway).
+		BackfillSubscriptionsToGateway(s.subscriptionRepo, s.gatewayEventsService, s.slogger, proxyUUID, orgId, gatewayID)
 	}
 
 	// Return deployment response
@@ -611,6 +620,8 @@ func (s *MCPDeploymentService) restoreMCPProxyDeployment(proxyUUID string, deplo
 
 		// Backfill existing active API keys to the gateway (see BackfillAPIKeysToGateway).
 		BackfillAPIKeysToGateway(s.apiKeyRepo, s.gatewayRepo, s.gatewayEventsService, s.slogger, proxyUUID, targetDeployment.GatewayID, "")
+		// Backfill existing subscriptions too (see BackfillSubscriptionsToGateway).
+		BackfillSubscriptionsToGateway(s.subscriptionRepo, s.gatewayEventsService, s.slogger, proxyUUID, orgId, targetDeployment.GatewayID)
 	}
 
 	resp, err := toAPIDeploymentResponse(

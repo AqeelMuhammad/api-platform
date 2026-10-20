@@ -234,12 +234,28 @@ func (s *GatewayInternalAPIService) IsAPIDeployedOnGateway(apiID, gatewayID, org
 		return apperror.RESTAPINotFound.New()
 	}
 
-	deploymentID, status, _, err := s.deploymentRepo.GetStatus(apiID, orgID, gatewayID)
+	return s.checkArtifactAssociatedWithGateway(apiID, gatewayID, orgID, "API")
+}
+
+// IsMCPProxyDeployedOnGateway returns nil if the MCP proxy has an active deployment_status row on
+// the gateway, MCP_PROXY_NOT_FOUND if the proxy does not exist, or DEPLOYMENT_NOT_ACTIVE if no
+// active deployment_status exists for the proxy+gateway.
+func (s *GatewayInternalAPIService) IsMCPProxyDeployedOnGateway(proxyID, gatewayID, orgID string) error {
+	if _, err := s.getMCPProxyForSubscriptions(proxyID, orgID); err != nil {
+		return err
+	}
+	return s.checkArtifactAssociatedWithGateway(proxyID, gatewayID, orgID, "MCP proxy")
+}
+
+// checkArtifactAssociatedWithGateway returns DEPLOYMENT_NOT_ACTIVE unless the artifact has an
+// active deployment_status row on the gateway.
+func (s *GatewayInternalAPIService) checkArtifactAssociatedWithGateway(artifactID, gatewayID, orgID, artifactLabel string) error {
+	deploymentID, status, _, err := s.deploymentRepo.GetStatus(artifactID, orgID, gatewayID)
 	if err != nil {
 		return fmt.Errorf("failed to get deployment status: %w", err)
 	}
 	if deploymentID == "" {
-		return apperror.DeploymentNotActive.New("API")
+		return apperror.DeploymentNotActive.New(artifactLabel)
 	}
 	// A transitional row (DEPLOYING/UNDEPLOYING) is still an association: the
 	// gateway fetches subscriptions while applying the artifact, before it has
@@ -250,7 +266,7 @@ func (s *GatewayInternalAPIService) IsAPIDeployedOnGateway(apiID, gatewayID, org
 	case model.DeploymentStatusDeployed, model.DeploymentStatusUndeployed,
 		model.DeploymentStatusDeploying, model.DeploymentStatusUndeploying:
 	default:
-		return apperror.DeploymentNotActive.New("API")
+		return apperror.DeploymentNotActive.New(artifactLabel)
 	}
 	return nil
 }
@@ -276,19 +292,9 @@ func (s *GatewayInternalAPIService) ListSubscriptionsForAPI(apiID, orgID string)
 		return nil, apperror.RESTAPINotFound.New()
 	}
 
-	// Internal sync: fetch all subscriptions for the API via pagination so reconciliation
-	// never performs destructive deletes due to a cutoff.
-	const pageSize = 1000
-	var subs []*model.Subscription
-	for offset := 0; ; offset += pageSize {
-		page, err := s.subscriptionRepo.ListByFilters(orgID, &apiID, nil, nil, nil, pageSize, offset)
-		if err != nil {
-			return nil, fmt.Errorf("failed to list subscriptions for API %s: %w", apiID, err)
-		}
-		subs = append(subs, page...)
-		if len(page) < pageSize {
-			break
-		}
+	subs, err := s.listAllSubscriptionsForArtifact(apiID, orgID)
+	if err != nil {
+		return nil, err
 	}
 
 	items := make([]dto.GatewaySubscriptionInfo, len(subs))
@@ -306,6 +312,71 @@ func (s *GatewayInternalAPIService) ListSubscriptionsForAPI(apiID, orgID string)
 		}
 	}
 	return items, nil
+}
+
+// ListSubscriptionsForMCPProxy lists subscriptions for a given MCP proxy within an organization.
+func (s *GatewayInternalAPIService) ListSubscriptionsForMCPProxy(proxyID, orgID string) ([]dto.GatewayMCPSubscriptionInfo, error) {
+	if proxyID == "" || orgID == "" {
+		return nil, apperror.ValidationFailed.New("The MCP proxy id and organization id are required.")
+	}
+	if _, err := s.getMCPProxyForSubscriptions(proxyID, orgID); err != nil {
+		return nil, err
+	}
+
+	subs, err := s.listAllSubscriptionsForArtifact(proxyID, orgID)
+	if err != nil {
+		return nil, err
+	}
+
+	items := make([]dto.GatewayMCPSubscriptionInfo, len(subs))
+	for i, sub := range subs {
+		items[i] = dto.GatewayMCPSubscriptionInfo{
+			ID:                 sub.UUID,
+			MCPProxyID:         sub.ArtifactUUID,
+			ApplicationID:      sub.ApplicationID,
+			SubscriptionToken:  sub.SubscriptionToken,
+			SubscriptionPlanID: sub.SubscriptionPlanID,
+			Status:             string(sub.Status),
+			CreatedAt:          sub.CreatedAt,
+			UpdatedAt:          sub.UpdatedAt,
+			Etag:               utils.GenerateDeterministicUUIDv7(sub.UUID, sub.UpdatedAt),
+		}
+	}
+	return items, nil
+}
+
+// getMCPProxyForSubscriptions returns the MCP proxy with the given UUID, or MCP_PROXY_NOT_FOUND
+// when it does not exist in the organization.
+func (s *GatewayInternalAPIService) getMCPProxyForSubscriptions(proxyID, orgID string) (*model.MCPProxy, error) {
+	proxy, err := s.mcpProxyRepo.GetByUUID(proxyID, orgID)
+	if err != nil {
+		if apperror.MCPProxyNotFound.Is(err) {
+			return nil, err
+		}
+		return nil, fmt.Errorf("failed to get MCP proxy: %w", err)
+	}
+	if proxy == nil || proxy.OrganizationUUID != orgID {
+		return nil, apperror.MCPProxyNotFound.New()
+	}
+	return proxy, nil
+}
+
+// listAllSubscriptionsForArtifact fetches every subscription of an artifact via pagination, so
+// gateway reconciliation never performs destructive deletes due to a cutoff.
+func (s *GatewayInternalAPIService) listAllSubscriptionsForArtifact(artifactID, orgID string) ([]*model.Subscription, error) {
+	const pageSize = 1000
+	var subs []*model.Subscription
+	for offset := 0; ; offset += pageSize {
+		page, err := s.subscriptionRepo.ListByFilters(orgID, &artifactID, nil, nil, nil, pageSize, offset)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list subscriptions for artifact %s: %w", artifactID, err)
+		}
+		subs = append(subs, page...)
+		if len(page) < pageSize {
+			break
+		}
+	}
+	return subs, nil
 }
 
 // ListSubscriptionPlansForOrg lists all subscription plans for an organization.

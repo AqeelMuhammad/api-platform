@@ -99,3 +99,16 @@ type GatewaySubscriptionInfo struct {
 	UpdatedAt          time.Time `json:"updatedAt"`
 	Etag               string    `json:"etag"` // Deterministic UUIDv7 derived from id + updatedAt
 }
+
+// GatewayMCPSubscriptionInfo represents an MCP proxy subscription in internal gateway responses.
+type GatewayMCPSubscriptionInfo struct {
+	ID                 string    `json:"id"`
+	MCPProxyID         string    `json:"mcpProxyId"`
+	ApplicationID      *string   `json:"applicationId,omitempty"`
+	SubscriptionToken  string    `json:"subscriptionToken"`
+	SubscriptionPlanID *string   `json:"subscriptionPlanId,omitempty"`
+	Status             string    `json:"status"`
+	CreatedAt          time.Time `json:"createdAt"`
+	UpdatedAt          time.Time `json:"updatedAt"`
+	Etag               string    `json:"etag"` // Deterministic UUIDv7 derived from id + updatedAt
+}

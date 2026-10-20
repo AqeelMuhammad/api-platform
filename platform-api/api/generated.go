@@ -4277,6 +4277,10 @@ type MCPProxy struct {
 	// ReadOnly True if the artifact originated from a data-plane gateway (origin gateway_api) and is read-only in the control plane; false for control-plane created artifacts.
 	ReadOnly *bool `json:"readOnly,omitempty" yaml:"readOnly,omitempty"`
 
+	// SubscriptionPlans List of subscription plan names enabled for this MCP proxy (e.g. Gold, Silver).
+	// When set, only these plans can be used when subscribing to the MCP proxy.
+	SubscriptionPlans *[]string `json:"subscriptionPlans,omitempty" yaml:"subscriptionPlans,omitempty"`
+
 	// UpdatedAt Timestamp when the resource was last updated
 	UpdatedAt *time.Time `json:"updatedAt,omitempty" yaml:"updatedAt,omitempty"`
 

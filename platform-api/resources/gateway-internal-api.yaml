@@ -589,6 +589,89 @@ paths:
   # Agent Endpoints
   # ==========================================
 
+  /mcp-proxies/{proxyId}/subscriptions:
+    get:
+      summary: List subscriptions for an MCP proxy
+      description: |
+        Retrieves all subscriptions for a specific MCP proxy deployed on the authenticated gateway.
+        Used by gateways to bulk-sync MCP proxy subscriptions on startup and reconnect.
+
+        The gateway must have an active deployment for the requested MCP proxy; otherwise
+        a 403 Forbidden is returned.
+
+        Each subscription includes an `etag` field — a deterministic UUIDv7 derived from
+        `id + updatedAt` — that the gateway uses as the EventHub correlation ID
+        for replica-sync deduplication.
+
+        **Authentication**: Requires `api-key` header with a valid gateway token.
+      operationId: getSubscriptionsForMCPProxy
+      tags:
+        - Gateway Internal APIs
+      parameters:
+        - name: proxyId
+          in: path
+          required: true
+          description: The unique identifier (UUID) of the MCP proxy
+          schema:
+            type: string
+            format: uuid
+            example: "550e8400-e29b-41d4-a716-446655440000"
+      responses:
+        '200':
+          description: Successfully retrieved subscriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GatewayMCPSubscriptionInfo'
+        '400':
+          description: Bad request - MCP proxy ID missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 400
+                message: "Bad Request"
+                description: "MCP proxy ID is required"
+        '401':
+          description: Unauthorized - Invalid or missing API key
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden - MCP proxy not deployed on this gateway
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 403
+                message: "Forbidden"
+                description: "MCP proxy is not associated with this gateway"
+        '404':
+          description: MCP proxy not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 404
+                message: "Not Found"
+                description: "MCP proxy not found"
+        '500':
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                code: 500
+                message: "Internal Server Error"
+                description: "Failed to get subscriptions"
+
   /agents/{agentId}:
     get:
       summary: Get the deployed Agent artifact by ID
@@ -1724,6 +1807,58 @@ components:
           type: string
           format: uuid
           description: UUID of the subscribed API
+        applicationId:
+          type: string
+          format: uuid
+          description: UUID of the subscribing application (optional)
+        subscriptionToken:
+          type: string
+          description: Token used to authenticate subscription requests
+        subscriptionPlanId:
+          type: string
+          format: uuid
+          description: UUID of the associated subscription plan (optional)
+        status:
+          type: string
+          enum:
+            - ACTIVE
+            - INACTIVE
+            - REVOKED
+          example: "ACTIVE"
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        etag:
+          type: string
+          format: uuid
+          description: >
+            Deterministic UUIDv7 derived from id + updatedAt.
+            Used as the EventHub correlation ID for replica-sync deduplication.
+          example: "019575a0-5678-7def-8abc-abcdef012345"
+
+    GatewayMCPSubscriptionInfo:
+      type: object
+      description: MCP proxy subscription information for gateway sync
+      required:
+        - id
+        - mcpProxyId
+        - subscriptionToken
+        - status
+        - createdAt
+        - updatedAt
+        - etag
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Unique identifier of the subscription
+        mcpProxyId:
+          type: string
+          format: uuid
+          description: UUID of the subscribed MCP proxy
         applicationId:
           type: string
           format: uuid
